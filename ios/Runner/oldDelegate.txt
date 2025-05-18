@@ -1,0 +1,150 @@
+import Flutter
+import UIKit
+import MediaPipeTasksVision
+
+@main
+@objc class AppDelegate: FlutterAppDelegate {
+  private var handLandmarker: MPPHandLandmarker?
+  private let channelName = "com.powershell1.movemind/handlandmarker"
+
+  override func application(
+    _ application: UIApplication,
+    didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
+  ) -> Bool {
+    let controller = window?.rootViewController as! FlutterViewController
+    let channel = FlutterMethodChannel(name: channelName, binaryMessenger: controller.binaryMessenger)
+
+    channel.setMethodCallHandler { [weak self] (call: FlutterMethodCall, result: @escaping FlutterResult) in
+      guard let self = self else { return }
+
+      switch call.method {
+      case "initializeHandLandmarker":
+        self.initializeHandLandmarker(result: result)
+      case "testMessage":
+        if let args = call.arguments as? [String: Any],
+           let message = args["message"] as? String {
+          result("Received message: \(message)")
+        } else {
+          result(FlutterError(code: "INVALID_ARGUMENTS", message: "Invalid arguments", details: nil))
+        }
+      case "detectHandLandmarks":
+        if let args = call.arguments as? [String: Any],
+           let imageBytes = args["imageBytes"] as? FlutterStandardTypedData,
+           let width = args["width"] as? Int,
+           let height = args["height"] as? Int {
+          self.detectHandLandmarks(imageBytes: imageBytes.data, width: width, height: height, result: result)
+        } else {
+          result(FlutterError(code: "INVALID_ARGUMENTS", message: "Invalid arguments for detection", details: nil))
+        }
+      default:
+        result(FlutterMethodNotImplemented)
+      }
+    }
+
+    GeneratedPluginRegistrant.register(with: self)
+    return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+  }
+
+  private func initializeHandLandmarker(result: @escaping FlutterResult) {
+    do {
+      // Get path to the model file
+      guard let modelPath = Bundle.main.path(forResource: "hand_landmarker", ofType: "task") else {
+        result(FlutterError(code: "MODEL_ERROR", message: "Model file not found", details: nil))
+        return
+      }
+
+      // Configure options
+      let baseOptions = MPPBaseOptions(modelAssetPath: modelPath)
+      let handLandmarkerOptions = MPPHandLandmarkerOptions()
+      handLandmarkerOptions.baseOptions = baseOptions
+      handLandmarkerOptions.numHands = 2
+      handLandmarkerOptions.minHandDetectionConfidence = 0.5
+      handLandmarkerOptions.minHandPresenceConfidence = 0.5
+      handLandmarkerOptions.minTrackingConfidence = 0.5
+      handLandmarkerOptions.runningMode = .image
+
+      // Create hand landmarker
+      handLandmarker = try MPPHandLandmarker(options: handLandmarkerOptions)
+      result(true)
+    } catch {
+      result(FlutterError(code: "INIT_ERROR", message: "Failed to initialize HandLandmarker: \(error.localizedDescription)", details: nil))
+    }
+  }
+
+  private func detectHandLandmarks(imageBytes: Data, width: Int, height: Int, result: @escaping FlutterResult) {
+    guard let handLandmarker = handLandmarker else {
+      result(FlutterError(code: "DETECTION_ERROR", message: "HandLandmarker not initialized", details: nil))
+      return
+    }
+
+    do {
+      // Convert bytes to CGImage
+      let dataProvider = CGDataProvider(data: imageBytes as CFData)!
+      let bitsPerComponent = 8
+      let bitsPerPixel = 24
+      let bytesPerRow = width * 3
+      let colorSpace = CGColorSpaceCreateDeviceRGB()
+      let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue)
+
+      guard let cgImage = CGImage(width: width, height: height, bitsPerComponent: bitsPerComponent,
+                                 bitsPerPixel: bitsPerPixel, bytesPerRow: bytesPerRow, space: colorSpace,
+                                 bitmapInfo: bitmapInfo, provider: dataProvider, decode: nil,
+                                 shouldInterpolate: false, intent: .defaultIntent) else {
+        result(FlutterError(code: "IMAGE_ERROR", message: "Failed to create CGImage", details: nil))
+        return
+      }
+
+      // Create MPImage
+      let mpImage = try MPPImage(cgImage: cgImage)
+
+      // Detect hand landmarks
+      let landmarkerResult = try handLandmarker.detect(image: mpImage)
+
+      // Convert result to JSON
+      let jsonArray = self.handLandmarkerResultToJson(result: landmarkerResult)
+      result(jsonArray)
+    } catch {
+      result(FlutterError(code: "DETECTION_ERROR", message: "Hand landmark detection failed: \(error.localizedDescription)", details: nil))
+    }
+  }
+
+  private func handLandmarkerResultToJson(result: MPPHandLandmarkerResult) -> String {
+    var jsonArray: [[String: Any]] = []
+
+    for i in 0..<result.handedness.count {
+      var handObject: [String: Any] = [:]
+
+      // Get handedness
+      let handedness = result.handedness[i].first!
+      handObject["handedness"] = handedness.categoryName
+      handObject["score"] = handedness.score
+
+      // Get landmarks
+      let landmarks = result.landmarks[i]
+      var landmarksArray: [[String: Any]] = []
+
+      for landmark in landmarks {
+        let landmarkObject: [String: Any] = [
+          "x": landmark.x,
+          "y": landmark.y,
+          "z": landmark.z
+        ]
+        landmarksArray.append(landmarkObject)
+      }
+
+      handObject["landmarks"] = landmarksArray
+      jsonArray.append(handObject)
+    }
+
+    do {
+      let jsonData = try JSONSerialization.data(withJSONObject: jsonArray, options: [])
+      if let jsonString = String(data: jsonData, encoding: .utf8) {
+        return jsonString
+      }
+    } catch {
+      print("Error converting result to JSON: \(error)")
+    }
+
+    return "[]"
+  }
+}
