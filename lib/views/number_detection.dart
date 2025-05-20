@@ -1,4 +1,4 @@
-import 'dart:convert';
+/*import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -112,6 +112,7 @@ class _PoseNumberDetectionScreen extends State<NumberDetectionScreen> {
             bottom: 20,
             left: 20,
             child: Text(
+
               'Predicted: $numberPrediction',
               style: TextStyle(
                 fontSize: 24,
@@ -127,3 +128,4 @@ class _PoseNumberDetectionScreen extends State<NumberDetectionScreen> {
 
 // The rest of your implementation...
 }
+*/

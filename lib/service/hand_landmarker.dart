@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/services.dart';
 import 'package:camera/camera.dart';
+import 'package:vector_math/vector_math_64.dart';
+import '../utils/hand_identifier.dart';
 import '../utils/image_converter.dart';
 
 class HandLandmarkerService {
@@ -43,5 +45,37 @@ class HandLandmarkerService {
       print('Hand landmark detection failed: $e');
       return [];
     }
+  }
+
+  Future<Map<Handedness, Hand>> detectHandLandmarksFromImage(CameraImage image) async {
+    Map<Handedness, Hand> detectedHand = {};
+    List<dynamic> handLandmarks =
+        await detectHandLandmarks(image);
+    if (handLandmarks.isNotEmpty) {
+      for (var hand in handLandmarks) {
+        int index = 0;
+        Map<HandLandmarks, HandKeyPoint> detectedKeyPoints = {};
+        hand['landmarks'].forEach((position) {
+          final x = 1 - (position['y'] as double);
+          final y = 1 - (position['x'] as double);
+          final z = position['z'] as double;
+          final landmark = HandLandmarks.values[index];
+          // final index = position['index'] as int;
+          detectedKeyPoints[landmark] = HandKeyPoint(
+            position: Vector3(x, y, z),
+            landmark: landmark,
+          );
+          index++;
+        });
+        Handedness handedness =
+        Handedness.values[hand['handedness'] == 'Left' ? 0 : 1];
+        Hand handConstructed = Hand(
+          handedness: handedness,
+          keyPoints: detectedKeyPoints,
+        );
+        detectedHand[handedness] = handConstructed;
+      }
+    }
+    return detectedHand;
   }
 }
