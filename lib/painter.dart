@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:movemind/utils/hand_identifier.dart';
+import 'package:vector_math/vector_math_64.dart' as vector_math;
 import 'views/view.dart'; // Import to use the SkeletonPosition class
 
 class PosePainter extends CustomPainter {
@@ -58,13 +59,13 @@ class PosePainter extends CustomPainter {
     hands.forEach((handedness, hand) {
       // Draw connections
       for (var connection in skeletonConnections) {
-        final p1 = hand.keyPoints[connection[0]];
-        final p2 = hand.keyPoints[connection[1]];
+        final p1 = hand.keyPoints[connection[0]]!.position;
+        final p2 = hand.keyPoints[connection[1]]!.position;
 
         // Only draw if both keypoints have good confidence
         canvas.drawLine(
-            Offset(p1!.x * scaleX, p1.y * scaleY),
-            Offset(p2!.x * scaleX, p2.y * scaleY),
+            Offset(p1.x * scaleX, p1.y * scaleY),
+            Offset(p2.x * scaleX, p2.y * scaleY),
             paint
         );
       }
@@ -72,8 +73,9 @@ class PosePainter extends CustomPainter {
     // Draw joints
     hands.forEach((handedness, hand) {
       for (var point in hand.keyPoints.values) {
+        vector_math.Vector3 position = point.position;
         canvas.drawCircle(
-            Offset(point.x * scaleX, point.y * scaleY),
+            Offset(position.x * scaleX, position.y * scaleY),
             6,
             jointPaint
         );
