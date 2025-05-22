@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:movemind/utils/handIdentifier.dart';
-import 'package:vector_math/vector_math_64.dart' as vector_math;
-import 'views/view.dart'; // Import to use the SkeletonPosition class
+import 'package:movemind/service/handLandmark.dart';
 
 class PosePainter extends CustomPainter {
   final Map<Handedness, Hand> hands;

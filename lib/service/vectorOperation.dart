@@ -1,8 +1,8 @@
 import 'dart:math';
 import 'package:vector_math/vector_math_64.dart';
-import '../utils/handIdentifier.dart';
+import 'handLandmark.dart';
 
-class GestureDetection {
+class VectorOperation {
   static const double TARGET_SCALE = 0.2;
 
   static double vectorNorm(Vector3 v) => v.length;

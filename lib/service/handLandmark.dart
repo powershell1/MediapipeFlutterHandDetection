@@ -3,8 +3,51 @@ import 'dart:convert';
 import 'package:flutter/services.dart';
 import 'package:camera/camera.dart';
 import 'package:vector_math/vector_math_64.dart';
-import '../utils/handIdentifier.dart';
 import '../utils/imageConverter.dart';
+
+enum Handedness {
+  left,
+  right,
+}
+
+enum HandLandmarks {
+  wrist,
+  thumbCmc,
+  thumbMcp,
+  thumbIp,
+  thumbTip,
+  indexFingerMcp,
+  indexFingerPip,
+  indexFingerDip,
+  indexFingerTip,
+  middleFingerMcp,
+  middleFingerPip,
+  middleFingerDip,
+  middleFingerTip,
+  ringFingerMcp,
+  ringFingerPip,
+  ringFingerDip,
+  ringFingerTip,
+  pinkyMcp,
+  pinkyPip,
+  pinkyDip,
+  pinkyTip
+}
+
+class HandKeyPoint {
+  final Vector3 position;
+  final HandLandmarks landmark;
+  HandKeyPoint({required this.position, required this.landmark});
+}
+
+class Hand {
+  final Handedness handedness;
+  final Map<HandLandmarks, HandKeyPoint> keyPoints;
+  Hand({required this.handedness, required this.keyPoints});
+
+  @override
+  String toString() => 'Hand { handedness: $handedness, keyPoints: $keyPoints }';
+}
 
 class HandLandmarkerService {
   static const MethodChannel _channel = MethodChannel('com.powershell1.movemind/handlandmarker');
