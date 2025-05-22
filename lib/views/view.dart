@@ -3,16 +3,11 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
-import 'package:flutter/services.dart';
 import 'package:movemind/painter.dart';
 import 'package:movemind/service/handLandmark.dart';
-import 'package:movemind/utils/handIdentifier.dart';
-import 'package:movemind/utils/imageConverter.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:image/image.dart' as imglib;
 import 'package:tflite_flutter/tflite_flutter.dart';
 import 'package:vector_math/vector_math_64.dart' as vectorMath;
-import '../service/gestureDetection.dart';
+import '../service/vectorOperation.dart';
 
 // ...existing utility code...
 enum GestureType {
@@ -63,7 +58,7 @@ class _PoseDetectionScreenState extends State<PoseDetectionScreen> with SingleTi
     const int outputSize = 11;
     List<vectorMath.Vector3> keyPoints =
         HandLandmarks.values.map((lm) => landmarks[lm]!.position).toList();
-    keyPoints = GestureDetection.landmarkNormalization(keyPoints);
+    keyPoints = VectorOperation.landmarkNormalization(keyPoints);
     List<double> inputData = [];
     for (var pt in keyPoints) {
       inputData.addAll([pt.x, pt.y, pt.z]);
