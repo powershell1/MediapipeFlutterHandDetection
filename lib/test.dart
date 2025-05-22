@@ -1,4 +1,4 @@
-import 'package:movemind/service/gesture_detection.dart';
+import 'package:movemind/service/gestureDetection.dart';
 import 'package:vector_math/vector_math_64.dart';
 
 void main() {
@@ -6,3 +6,4 @@ void main() {
   List<Vector3> tans = GestureDetection.landmarkNormalization(landmark);
   print(tans);
 }
+
