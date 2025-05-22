@@ -1,59 +1,20 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
-
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:flutter/services.dart';
 import 'package:movemind/painter.dart';
-import 'package:movemind/service/hand_landmarker.dart';
-import 'package:movemind/utils/hand_identifier.dart';
-import 'package:movemind/utils/image_converter.dart';
+import 'package:movemind/service/handLandmark.dart';
+import 'package:movemind/utils/handIdentifier.dart';
+import 'package:movemind/utils/imageConverter.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:image/image.dart' as imglib;
 import 'package:tflite_flutter/tflite_flutter.dart';
 import 'package:vector_math/vector_math_64.dart' as vectorMath;
+import '../service/gestureDetection.dart';
 
-import '../service/gesture_detection.dart';
-
-class PoseDetectionScreen extends StatefulWidget {
-  final List<CameraDescription> cameras;
-
-  const PoseDetectionScreen({Key? key, required this.cameras})
-      : super(key: key);
-
-  @override
-  State<PoseDetectionScreen> createState() => _PoseDetectionScreenState();
-}
-
-Future<Uint8List> loadJsonAsUint8List(String assetPath) async {
-  // Load the JSON file as string
-  final jsonString = await rootBundle.loadString(assetPath);
-
-  // Parse the JSON string
-  final jsonData = jsonDecode(jsonString);
-
-  // Convert to Uint8List - this assumes jsonData contains a flat array of numbers
-  if (jsonData is List) {
-    // If JSON contains a flat array of numbers
-    final buffer = Uint8List(jsonData.length);
-    for (int i = 0; i < jsonData.length; i++) {
-      buffer[i] = jsonData[i] as int;
-    }
-    return buffer;
-  } else if (jsonData is Map && jsonData.containsKey('data')) {
-    // If JSON has a 'data' field with the array
-    final dataList = jsonData['data'] as List;
-    final buffer = Uint8List(dataList.length);
-    for (int i = 0; i < dataList.length; i++) {
-      buffer[i] = dataList[i] as int;
-    }
-    return buffer;
-  }
-
-  throw Exception('JSON format not supported');
-}
-
+// ...existing utility code...
 enum GestureType {
   zero,
   one,
@@ -69,181 +30,136 @@ enum GestureType {
 }
 
 class GestureCheckResult {
-  final GestureType gestureType;
+  final GestureType type;
   final double confidence;
+  GestureCheckResult(this.type, this.confidence);
+}
 
-  GestureCheckResult(this.gestureType, this.confidence);
+class PoseDetectionScreen extends StatefulWidget {
+  final List<CameraDescription> cameras;
+  const PoseDetectionScreen({Key? key, required this.cameras}) : super(key: key);
+
+  @override
+  State<PoseDetectionScreen> createState() => _PoseDetectionScreenState();
 }
 
 class _PoseDetectionScreenState extends State<PoseDetectionScreen> with SingleTickerProviderStateMixin {
-late CameraController _cameraController;
-  late bool _isProcessing = false;
-  late Map<Handedness, Hand> _detectedHand = {};
+  // ...existing fields...
+  late CameraController _cameraController;
+  bool _isProcessing = false;
+  Map<Handedness, Hand> _detectedHands = {};
   late Interpreter interpreter;
-  final handLandmarkService = HandLandmarkerService();
-  late int score = 0;
-  late bool isCorrect = true;
-
-  late String predictedNumber = 'Nil';
-  late double confidence = 0.0;
-
-  late Handedness targetHanded = Handedness.left;
-
-  // Add these properties
+  final handLandmarker = HandLandmarkerService();
+  int score = 0;
+  String predictedGesture = 'Nil';
+  double gestureConfidence = 0.0;
+  Handedness targetHand = Handedness.left;
   late AnimationController _animationController;
   late Animation<double> _opacityAnimation;
-  bool _showAnimation = false;
+  bool _showFlash = false;
 
-  GestureCheckResult gestureChecking(Map<HandLandmarks, HandKeyPoint>  landmarks) {
-    final int inputSize = 63;
-    final int outputSize = 11;
-
-    List<vectorMath.Vector3> normalizedKeyPoints = [];
-    for (int i = 0; i < HandLandmarks.values.length; i++) {
-      vectorMath.Vector3 position = landmarks[HandLandmarks.values[i]]!.position;
-      normalizedKeyPoints.add(position);
+  GestureCheckResult checkGesture(Map<HandLandmarks, HandKeyPoint> landmarks) {
+    const int inputSize = 63;
+    const int outputSize = 11;
+    List<vectorMath.Vector3> keyPoints =
+        HandLandmarks.values.map((lm) => landmarks[lm]!.position).toList();
+    keyPoints = GestureDetection.landmarkNormalization(keyPoints);
+    List<double> inputData = [];
+    for (var pt in keyPoints) {
+      inputData.addAll([pt.x, pt.y, pt.z]);
     }
-    normalizedKeyPoints = GestureDetection.landmarkNormalization(normalizedKeyPoints);
-    // Convert to Uint8List
-    List<double> inputData = List<double>.filled(inputSize, 0.0);
-    for (int i = 0; i < inputSize/3; i++) {
-      int index = i * 3;
-      vectorMath.Vector3 position = normalizedKeyPoints[i];
-      inputData[index] = position.x;
-      inputData[index + 1] = position.y;
-      inputData[index + 2] = position.z;
-    }
-    // Convert to Float32List
-    Float32List input = Float32List.fromList(inputData);
-    // Prepare output buffer
-    List<List<double>> output = List.generate(1, (_) => List.generate(outputSize, (_) => 0.0));
-    interpreter.run(input, output);
-    List<double> outputData = output[0];
-    // Find the index of the maximum value
-    int maxIndex = outputData.indexOf(outputData.reduce((a, b) => a > b ? a : b));
-    // print(maxIndex);
-    return GestureCheckResult(GestureType.values[maxIndex], outputData[maxIndex]);
+    Float32List inputTensor = Float32List.fromList(inputData);
+    List<List<double>> outputTensor = List.generate(1, (_) => List.filled(outputSize, 0.0));
+    interpreter.run(inputTensor, outputTensor);
+    List<double> outputs = outputTensor[0];
+    int maxIndex = outputs.indexOf(outputs.reduce((a, b) => a > b ? a : b));
+    return GestureCheckResult(GestureType.values[maxIndex], outputs[maxIndex]);
   }
 
-  void onAvailable(CameraImage image) async {
+  void processCameraImage(CameraImage image) async {
     if (_isProcessing) return;
     _isProcessing = true;
-    Map<Handedness, Hand> detectedHand = await handLandmarkService.detectHandLandmarksFromImage(image);
-    if (detectedHand.isNotEmpty) {
-      Map<Handedness, GestureType> handGesture = {};
-      for (Hand hand in detectedHand.values) {
-        GestureCheckResult result = gestureChecking(hand.keyPoints);
-
-        confidence = result.confidence;
-        if (result.confidence < 0.5) {
-          setState(() {
-            predictedNumber = 'Nil';
-          });
+    Map<Handedness, Hand> hands = await handLandmarker.detectHandFromImage(image);
+    if (hands.isNotEmpty) {
+      Map<Handedness, GestureType> gestures = {};
+      hands.forEach((side, hand) {
+        GestureCheckResult result = checkGesture(hand.keyPoints);
+        gestureConfidence = result.confidence;
+        if (result.confidence >= 0.5) {
+          gestures[side] = result.type;
+          predictedGesture = result.type.name;
+          _detectedHands = hands;
         } else {
-          handGesture[hand.handedness] = result.gestureType;
-          setState(() {
-            predictedNumber = result.gestureType.name;
-            _detectedHand = detectedHand;
-          });
+          predictedGesture = 'Nil';
         }
-      }
-      // Check if both hands are detected
-      Handedness leftHand = Handedness.values[(targetHanded.index + 1) % 2];
-      if (detectedHand[targetHanded] != null && detectedHand[leftHand] != null) {
-        if (handGesture[targetHanded] == GestureType.six && handGesture[leftHand] == GestureType.pinky) {
+      });
+      if (hands.containsKey(targetHand) &&
+          hands.containsKey(targetHand == Handedness.left ? Handedness.right : Handedness.left)) {
+        if (gestures[targetHand] == GestureType.six &&
+            gestures[targetHand == Handedness.left ? Handedness.right : Handedness.left] == GestureType.pinky) {
           score += 1;
-          targetHanded = leftHand;
-          showGreenFlash();
+          targetHand = (targetHand == Handedness.left) ? Handedness.right : Handedness.left;
+          triggerFlash();
         }
       } else {
-        // Only one hand is detected
-        print('Only one hand detected: ${detectedHand[targetHanded]}');
-
+        print('Only one hand detected: ${hands[targetHand]}');
       }
-      // Process hand landmarks
-      // print('Hand landmarks detected: $handLandmarks');
       await Future.delayed(const Duration(milliseconds: 50));
+      setState(() {});
     } else {
-      setState(() {
-        predictedNumber = 'Nil';
-      });
-      print('No hand landmarks detected');
+      predictedGesture = 'Nil';
+      print('No hands detected');
       await Future.delayed(const Duration(milliseconds: 250));
+      setState(() {});
     }
-    // await Future.delayed(const Duration(milliseconds: 250));
     _isProcessing = false;
   }
 
-  void initializeInterpreter() async {
+  void initInterpreter() async {
     try {
       interpreter = await Interpreter.fromAsset('assets/models/gestured_detection.tflite');
-      // Print shape of input and output tensors
-      var inputTensor = interpreter.getInputTensors();
-      var outputTensor = interpreter.getOutputTensors();
-      print('Input Tensor Shape: ${inputTensor[0].shape}');
-      print('Output Tensor Shape: ${outputTensor[0].shape}');
-      print('Interpreter initialized successfully');
-    } catch (e) {
-      print('Error initializing interpreter: $e');
+      print('Interpreter loaded: ${interpreter.getInputTensors()[0].shape} -> ${interpreter.getOutputTensors()[0].shape}');
+    } catch (err) {
+      print('Interpreter error: $err');
     }
   }
 
   @override
   void initState() {
     super.initState();
-    // Initialize animation controller
-    _animationController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1500),
-    );
-
-    // Create opacity animation that starts fully visible and fades out
+    _animationController = AnimationController(vsync: this, duration: const Duration(milliseconds: 1500));
     _opacityAnimation = Tween<double>(begin: 1.0, end: 0.0).animate(
       CurvedAnimation(
         parent: _animationController,
-        // Delay the fade out until halfway through
         curve: const Interval(0.2, 1.0, curve: Curves.easeOut),
       ),
     );
-
-    // Listen for animation completion to hide the overlay
     _animationController.addStatusListener((status) {
       if (status == AnimationStatus.completed) {
-        setState(() {
-          _showAnimation = false;
-        });
+        _showFlash = false;
         _animationController.reset();
+        setState(() {});
       }
     });
-
-    initializeInterpreter();
-
-    handLandmarkService.initialize();
-    _cameraController = CameraController(
-      widget.cameras[1],
-      ResolutionPreset.max,
-    );
+    initInterpreter();
+    handLandmarker.initialize();
+    _cameraController = CameraController(widget.cameras[1], ResolutionPreset.max);
     _cameraController.initialize().then((_) {
-      _cameraController.startImageStream(onAvailable);
+      _cameraController.startImageStream(processCameraImage);
       if (!mounted) return;
       setState(() {});
-    }).catchError((e) {
-      print('Error initializing camera: $e');
-    });
+    }).catchError((err) => print('Camera init error: $err'));
   }
 
-  // Add this method to trigger the animation
-  void showGreenFlash() {
-    setState(() {
-      _showAnimation = true;
-    });
+  void triggerFlash() {
+    _showFlash = true;
     _animationController.forward(from: 0.0);
+    setState(() {});
   }
 
   @override
   void dispose() {
     _animationController.dispose();
-
     _cameraController.stopImageStream();
     _cameraController.dispose();
     super.dispose();
@@ -252,80 +168,53 @@ late CameraController _cameraController;
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Pose Detection'),
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () async {
-          showGreenFlash();
-        },
-        child: const Icon(Icons.file_download),
-      ),
-      body:  _cameraController.value.isInitialized ? Stack(
-        children: [
-          CameraPreview(_cameraController),
-          CustomPaint(
-            painter: PosePainter(
-              hands: _detectedHand,
-            ),
-            size: MediaQuery.of(context).size,
-          ),
-          Positioned(
-            bottom: 20,
-            left: 20,
-            child: Text(
-              'Predicted: $predictedNumber',
-              style: TextStyle(
-                fontSize: 24,
-                color: Colors.white,
-                backgroundColor: Colors.orangeAccent.withOpacity(0.5),
-              ),
-            ),
-          ),
-          Positioned(
-            bottom: 55,
-            left: 20,
-            child: Text(
-              'Confident: ${(confidence*10000).toInt()/100}%',
-              style: TextStyle(
-                fontSize: 24,
-                color: Colors.white,
-                backgroundColor: Colors.blueAccent.withOpacity(0.5),
-              ),
-            ),
-          ),
-          Positioned(
-            top: 20,
-            left: 20,
-            child: Text(
-              'Score: $score',
-              style: TextStyle(
-                fontSize: 24,
-                color: Colors.white,
-                backgroundColor: Colors.black54,
-              ),
-            ),
-          ),
-
-          // Add this for the green flash animation
-          if (_showAnimation)
-            AnimatedBuilder(
-              animation: _animationController,
-              builder: (context, child) {
-                return Positioned.fill(
-                  child: Opacity(
-                    opacity: _opacityAnimation.value,
-                    child: Container(
-                      color: Colors.green.withOpacity(0.7),
+      appBar: AppBar(title: const Text('Pose Detection')),
+      floatingActionButton: FloatingActionButton(onPressed: triggerFlash, child: const Icon(Icons.file_download)),
+      body: _cameraController.value.isInitialized
+          ? Stack(
+              children: [
+                CameraPreview(_cameraController),
+                CustomPaint(
+                  painter: PosePainter(hands: _detectedHands),
+                  size: MediaQuery.of(context).size,
+                ),
+                Positioned(
+                  bottom: 20,
+                  left: 20,
+                  child: Text(
+                    'Predicted: $predictedGesture',
+                    style: TextStyle(fontSize: 24, color: Colors.white, backgroundColor: Colors.orangeAccent.withOpacity(0.5)),
+                  ),
+                ),
+                Positioned(
+                  bottom: 55,
+                  left: 20,
+                  child: Text(
+                    'Confidence: ${(gestureConfidence * 100).toStringAsFixed(2)}%',
+                    style: TextStyle(fontSize: 24, color: Colors.white, backgroundColor: Colors.blueAccent.withOpacity(0.5)),
+                  ),
+                ),
+                Positioned(
+                  top: 20,
+                  left: 20,
+                  child: Text(
+                    'Score: $score',
+                    style: TextStyle(fontSize: 24, color: Colors.white, backgroundColor: Colors.black54),
+                  ),
+                ),
+                if (_showFlash)
+                  AnimatedBuilder(
+                    animation: _animationController,
+                    builder: (context, child) => Positioned.fill(
+                      child: Opacity(
+                        opacity: _opacityAnimation.value,
+                        child: Container(color: Colors.green.withOpacity(0.7)),
+                      ),
                     ),
                   ),
-                );
-              },
-            ),
-        ],
-      ) : CircularProgressIndicator(),
+              ],
+            )
+          : Center(child: CircularProgressIndicator()),
     );
   }
-
-// The rest of your implementation...
 }
